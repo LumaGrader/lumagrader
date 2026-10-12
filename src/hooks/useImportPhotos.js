@@ -25,12 +25,15 @@ export async function ingestPhoto(blob, isRaw, id) {
   try {
     const { decodeAndDevelopRaw, targetStatsFromBlob, imageDataToBlob } = await import('../engine/rawPipeline')
     const target = embedded ? await targetStatsFromBlob(embedded) : null
-    const { imageData, params, asShotWB } = await decodeAndDevelopRaw(blob, { half: true, target })
+    const { imageData, params, asShotWB, colorUnknown, camera } = await decodeAndDevelopRaw(blob, { half: true, target })
     const bitmap = await createImageBitmap(imageData)
     const sourceBlob = await imageDataToBlob(imageData)
     const entry = await makeImageEntry(sourceBlob, id, bitmap)
     // Half-size decode for editing; report the real sensor resolution (export decodes full size).
-    return { ...entry, width: entry.width * 2, height: entry.height * 2, rawDevelop: params, rawSource: 'libraw', wbAsShot: asShotWB || null }
+    return {
+      ...entry, width: entry.width * 2, height: entry.height * 2, rawDevelop: params, rawSource: 'libraw', wbAsShot: asShotWB || null,
+      ...(colorUnknown ? { rawColorUnknown: camera || 'this camera' } : {}),
+    }
   } catch (err) {
     console.warn('RAW decode failed — using the embedded preview instead.', err)
     if (!embedded) throw err
@@ -55,6 +58,7 @@ export function useImportPhotos() {
     const hadNone = state.images.length === 0
     const failed = []
     const previewOnly = []
+    const colorUnknown = new Set()
     let added = 0
     dispatch({ type: 'SET_IMPORT_PROGRESS', progress: { done: 0, total: files.length } })
 
@@ -79,6 +83,7 @@ export function useImportPhotos() {
         })
         if (hadNone && added === 0) dispatch({ type: 'SET_ACTIVE', id })
         if (entry.rawSource === 'embedded') previewOnly.push(file.name)
+        if (entry.rawColorUnknown) colorUnknown.add(entry.rawColorUnknown)
         added++
       } catch (err) {
         console.warn('Failed to load', file.name, err)
@@ -97,6 +102,11 @@ export function useImportPhotos() {
       // Visible, so a silent fallback to the camera's JPEG preview is never mistaken for the real RAW.
       const names = previewOnly.slice(0, 2).join(', ') + (previewOnly.length > 2 ? ` +${previewOnly.length - 2} more` : '')
       toast(`${names}: RAW data couldn't be decoded — using the camera preview. Reload the page and import again; if it keeps happening, check the console.`, { type: 'error', duration: 9000 })
+    }
+    if (colorUnknown.size) {
+      // LibRaw has no colour profile for this camera yet → colours will be off; DNG carries its own.
+      const cams = [...colorUnknown].slice(0, 2).join(', ')
+      toast(`${cams}: no colour profile for this camera yet, so colours may look off. Converting the files to DNG first gives correct colours.`, { type: 'error', duration: 10000 })
     }
     if (skipped) toast(`Skipped ${skipped} unsupported file${skipped === 1 ? '' : 's'}`, { type: 'error' })
   }

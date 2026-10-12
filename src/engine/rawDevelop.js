@@ -137,22 +137,47 @@ function toneAndColor(data16, w, h, p, lut, sat, out) {
   }
 }
 
-/** Mean encoded saturation of a pixel sample after develop with saturation factor s. */
-function sampledSaturation(data16, w, h, lut, s) {
-  const step = Math.max(1, Math.floor(Math.sqrt((w * h) / 40000)))
-  let acc = 0, n = 0
-  for (let y = 0; y < h; y += step) for (let x = 0; x < w; x += step) {
-    const i = (y * w + x) * 3
-    const r0 = data16[i], g0 = data16[i + 1], b0 = data16[i + 2]
-    const yi = Math.min(65535, (W_R * r0 + W_G * g0 + W_B * b0 + 0.5) | 0)
-    const k = lut[yi] / 65535
-    let r = r0 * k, g = g0 * k, b = b0 * k
+/**
+ * Toned (not yet saturated) linear RGB samples for the saturation fit, each the average of a
+ * small block. The target is measured on the camera JPEG scaled to ~800 px (in-camera noise
+ * reduction + downscale), so the RAW is measured at the same scale: block-averaging removes
+ * colour noise that would otherwise read as "colour" (at high ISO the fit then made the photo
+ * duller, and colour NR afterwards removed the rest).
+ */
+const SAT_FIT_SCALE = 800
+function saturationSamples(data16, w, h, lut) {
+  const block = Math.max(1, Math.round(Math.max(w, h) / SAT_FIT_SCALE))
+  const step = Math.max(block, Math.floor(Math.sqrt((w * h) / 40000)))
+  const out = []
+  for (let y0 = 0; y0 + block <= h; y0 += step) for (let x0 = 0; x0 + block <= w; x0 += step) {
+    let r = 0, g = 0, b = 0
+    for (let y = y0; y < y0 + block; y++) for (let x = x0; x < x0 + block; x++) {
+      const i = (y * w + x) * 3
+      const r0 = data16[i], g0 = data16[i + 1], b0 = data16[i + 2]
+      const yi = Math.min(65535, (W_R * r0 + W_G * g0 + W_B * b0 + 0.5) | 0)
+      const k = lut[yi] / 65535
+      r += r0 * k; g += g0 * k; b += b0 * k
+    }
+    const nb = block * block
+    out.push(r / nb, g / nb, b / nb)
+  }
+  return out
+}
+
+/** Mean encoded saturation of the samples with saturation factor s (same maths as toneAndColor). */
+function sampledSaturation(samples, s) {
+  let acc = 0
+  for (let i = 0; i < samples.length; i += 3) {
+    let r = samples[i], g = samples[i + 1], b = samples[i + 2]
     const Y = W_R * r + W_G * g + W_B * b
     r = Y + (r - Y) * s; g = Y + (g - Y) * s; b = Y + (b - Y) * s
-    acc += satOf(srgbEncode(Math.min(1, Math.max(0, r))), srgbEncode(Math.min(1, Math.max(0, g))), srgbEncode(Math.min(1, Math.max(0, b))))
-    n++
+    const m = Math.max(r, g, b)
+    if (m > 1) {
+      if (Y >= 1) { r = g = b = 1 } else { const t = (1 - Y) / (m - Y); r = Y + (r - Y) * t; g = Y + (g - Y) * t; b = Y + (b - Y) * t }
+    }
+    acc += satOf(srgbEncode(Math.max(0, r)), srgbEncode(Math.max(0, g)), srgbEncode(Math.max(0, b)))
   }
-  return acc / n
+  return acc / Math.max(1, samples.length / 3)
 }
 
 /**
@@ -204,10 +229,11 @@ export function developRaw(data16, w, h, params) {
   const lut = buildRatioLUT(p)
   if (p.targetSaturation != null && p.saturation === 1 && !p.saturationFitted) {
     // Match the camera's colourfulness (bisection on a pixel sample), within sane bounds.
+    const samples = saturationSamples(data16, w, h, lut)
     let lo = 0.8, hi = 1.6
     for (let it = 0; it < 14; it++) {
       const mid = (lo + hi) / 2
-      if (sampledSaturation(data16, w, h, lut, mid) < p.targetSaturation) lo = mid
+      if (sampledSaturation(samples, mid) < p.targetSaturation) lo = mid
       else hi = mid
     }
     p.saturation = Math.round(((lo + hi) / 2) * 1000) / 1000

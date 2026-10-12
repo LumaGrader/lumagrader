@@ -114,6 +114,17 @@ export async function targetStatsFromBlob(blob) {
   return { ...targetStatsFromRGBA(ctx.getImageData(0, 0, c.width, c.height).data), portrait: c.height > c.width }
 }
 
+/**
+ * True when LibRaw has a colour matrix for this camera (built-in table or the DNG's own
+ * ColorMatrix). Without one, cam_xyz stays all zero and LibRaw outputs uncorrected camera RGB,
+ * so colours are noticeably off — newer cameras than the bundled LibRaw hit this.
+ */
+export function hasCameraColorMatrix(colorData) {
+  const m = colorData?.cam_xyz
+  if (!Array.isArray(m)) return false
+  return m.slice(0, 3).some((row) => Array.isArray(row) && row.slice(0, 3).some((v) => Number.isFinite(v) && Math.abs(v) > 1e-6))
+}
+
 /** Rotates RGBA by 90° steps (safety net if the decoder didn't apply the RAW's orientation). */
 function rotateRGBA(rgba, w, h, quarterTurnsCW) {
   const q = ((quarterTurnsCW % 4) + 4) % 4
@@ -157,7 +168,9 @@ export async function decodeAndDevelopRaw(file, { half = true, params = null, ta
   const fitted = { ...res.params, portrait: h > w }
   let asShotWB = null
   try { asShotWB = asShotFromLibRaw(meta?.color_data) } catch { /* no Kelvin for this file */ }
-  return { imageData: new ImageData(rgba, w, h), params: fitted, asShotWB }
+  const colorUnknown = !hasCameraColorMatrix(meta?.color_data)
+  const camera = [meta?.normalized_make || meta?.camera_make, meta?.normalized_model || meta?.camera_model].filter(Boolean).join(' ')
+  return { imageData: new ImageData(rgba, w, h), params: fitted, asShotWB, colorUnknown, camera }
 }
 
 /** ImageData → Blob (PNG keeps the clean RAW pixels; no JPEG artifacts reintroduced). */
