@@ -2,7 +2,7 @@ node_modules/
 dist/
 
 # generated from node_modules/libraw-wasm by scripts/copy-libraw.mjs
-public/libraw/
+public/editor/libraw/
 
 # local / OS files
 .env

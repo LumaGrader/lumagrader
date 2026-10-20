@@ -1,9 +1,20 @@
-# LumaGrader by Rax
+# LumaGrader website + web editor
 
-A free RAW and JPEG photo editor that runs entirely in your browser, on phones and computers.
+This repo is **lumagrader.app**:
 
-**▶ Open the app:** <https://lumagrader.app>
+- **`/`**: the download site for **LumaGrader Photo Studio**, the free, open-source Mac app
+  (source: [RMalayte/lumagrader-photo-studio](https://github.com/RMalayte/lumagrader-photo-studio)).
+  `index.html` + `src/home/` (no framework). The Download button finds the newest `.dmg` in that
+  repo's GitHub Releases and then shows a thank-you card with the Ko-fi link.
+- **`/editor/`**: the **LumaGrader web editor**, a free RAW and JPEG photo editor that runs
+  entirely in the browser, on phones and computers. `editor/index.html` + the rest of `src/`.
+
+**▶ Web editor:** <https://lumagrader.app/editor/>
 **📖 [User guide](docs/USER_GUIDE.md)** · **☕ [Support on Ko-fi](https://ko-fi.com/lumagrader)**
+
+The editor moved from `/` to `/editor/` in October 2026. Same origin, so projects and presets saved
+in the browser are kept. `public/sw.js` is a retired service worker that removes the old root
+worker and its caches; the editor's worker, manifest and LibRaw files live in `public/editor/`.
 
 **Privacy:** your photos never leave your device. RAW decoding, editing and export all run in
 the browser. There is no server, account, analytics or upload.

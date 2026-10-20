@@ -3,30 +3,155 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <meta name="description" content="LumaGrader by Rax — free RAW & JPEG photo editor in your browser." />
-  <meta name="theme-color" content="#111315" />
+  <title>LumaGrader Photo Studio for Mac</title>
+  <meta name="description" content="A free, open-source RAW photo editor and photo library for Mac. Works offline: your photos stay on your computer." />
+  <meta name="theme-color" content="#011326" />
   <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png" />
   <link rel="icon" type="image/png" sizes="64x64" href="/favicon-64.png" />
   <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
-  <link rel="manifest" href="/manifest.webmanifest" />
-  <title>LumaGrader by Rax</title>
   <link rel="canonical" href="https://lumagrader.app/" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="LumaGrader" />
   <meta property="og:url" content="https://lumagrader.app/" />
-  <meta property="og:title" content="LumaGrader — free RAW photo editor in your browser" />
-  <meta property="og:description" content="Edit RAW and JPEG photos on your phone or computer. No account, no upload: your photos stay on your device." />
-  <meta property="og:image" content="https://lumagrader.app/og-image.png?v=2" />
+  <meta property="og:title" content="LumaGrader Photo Studio for Mac" />
+  <meta property="og:description" content="A free, open-source RAW photo editor and photo library for Mac. Works offline." />
+  <meta property="og:image" content="https://lumagrader.app/og-home.png?v=1" />
   <meta property="og:image:width" content="1200" />
   <meta property="og:image:height" content="630" />
-  <meta property="og:image:alt" content="LumaGrader logo and a before/after of an edited photo: free RAW photo editor, right in your browser" />
+  <meta property="og:image:alt" content="LumaGrader Photo Studio for Mac, a free RAW photo editor" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="LumaGrader — free RAW photo editor in your browser" />
-  <meta name="twitter:description" content="Edit RAW and JPEG photos on your phone or computer. No account, no upload." />
-  <meta name="twitter:image" content="https://lumagrader.app/og-image.png?v=2" />
+  <meta name="twitter:image" content="https://lumagrader.app/og-home.png?v=1" />
+  <link rel="stylesheet" href="/src/home/home.css" />
+  <script>
+    // The web editor used to live here. Opened as an installed app (old shortcut), go there.
+    if (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches) location.replace('editor/')
+  </script>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.jsx"></script>
+  <a class="skip" href="#download">Skip to download</a>
+
+  <header class="top">
+    <a class="brand" href="./" aria-label="LumaGrader home">
+      <svg class="mark" viewBox="0 0 100 100" aria-hidden="true">
+        <rect width="100" height="100" rx="22.5" fill="#30B2F7" />
+        <rect x="7.5" y="7.5" width="85" height="85" rx="15" fill="#011326" />
+        <polygon points="19.2,20.3 36.9,20.3 36.9,65.4 55.1,65.4 70.3,80.6 19.2,80.6" fill="#8CD7FA" />
+        <path d="M44.6 46.7 H75.2 A4.7 4.7 0 0 1 79.9 51.4 V82 Z" fill="#30B2F7" />
+      </svg>
+      <span class="wordmark"><span>Luma</span><span class="grader">Grader</span></span>
+    </a>
+    <nav aria-label="Main">
+      <a href="#features">Features</a>
+      <a href="#first-open">Install help</a>
+      <a href="editor/">Web editor</a>
+      <a class="nav-gh" href="https://github.com/RMalayte/lumagrader-photo-studio" rel="noopener">Source code</a>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-copy">
+        <h1 id="hero-title">Photo Studio <span class="for">for Mac</span></h1>
+        <p class="lede">Import, cull, edit RAW, print and shoot tethered in one free app. It works offline, and your photos never leave your Mac.</p>
+        <div class="cta" id="download">
+          <a class="btn-download" id="download-btn" href="https://github.com/RMalayte/lumagrader-photo-studio/releases/latest">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16" /></svg>
+            <span>Download for Mac</span>
+          </a>
+          <a class="btn-support" href="https://ko-fi.com/lumagrader" rel="noopener" data-kofi>Support on Ko-fi</a>
+        </div>
+        <p class="meta" id="download-meta">Free. Needs macOS 14 Sonoma or newer, Apple silicon or Intel.</p>
+      </div>
+
+      <figure class="wedge" aria-label="Zone scale from pure black (zone 0) to pure white (zone 10)">
+        <div class="zones">
+          <span style="--z:0">0</span><span style="--z:1">I</span><span style="--z:2">II</span><span style="--z:3">III</span><span style="--z:4">IV</span><span style="--z:5">V</span><span style="--z:6">VI</span><span style="--z:7">VII</span><span style="--z:8">VIII</span><span style="--z:9">IX</span><span style="--z:10">X</span>
+        </div>
+        <figcaption>Every zone, from the deepest shadow to paper white. Tone is what LumaGrader is built around.</figcaption>
+      </figure>
+    </section>
+
+    <section class="features" id="features" aria-labelledby="features-title">
+      <h2 id="features-title">From the memory card to the print</h2>
+      <p class="section-lede">Built by a working photographer for his own shoots: weddings, events, portraits and travel. The whole workflow lives in one window.</p>
+      <ol class="flow">
+        <li>
+          <h3>Import and cull</h3>
+          <p>Copy from the card into dated shoot folders with a backup copy. Rate, flag and label with the keyboard, compare and survey, and let AI Cull flag closed eyes, soft focus and bursts of similar shots. Faces are grouped into People.</p>
+        </li>
+        <li>
+          <h3>Develop</h3>
+          <p>RAW processing with white balance, tone curve, color mixer, color grading, denoise and lens blur. Masks with Select Subject, healing, presets, .cube LUTs and Lightroom-style .xmp presets. Edits never touch your original files.</p>
+        </li>
+        <li>
+          <h3>Export and print</h3>
+          <p>Export JPEG, 16-bit TIFF or PNG, resized and watermarked. Print with ICC paper profiles and a soft proof that shows how the print will look.</p>
+        </li>
+        <li>
+          <h3>Shoot tethered</h3>
+          <p>Connect a Canon camera with EOS Utility and every shot appears large on screen the moment it's taken, with your develop settings already applied.</p>
+        </li>
+      </ol>
+      <p class="privacy">No account, no cloud, no subscription. Your catalog is a file on your Mac, and you can back it up from the app.</p>
+    </section>
+
+    <section class="first-open" id="first-open" aria-labelledby="first-open-title">
+      <div class="first-open-intro">
+        <h2 id="first-open-title">Opening it the first time</h2>
+        <p>macOS shows a warning the first time you open the app. That is normal: Apple only skips the warning for apps signed with a paid developer account, and LumaGrader is shared directly by an independent developer. You confirm it once.</p>
+      </div>
+      <ol class="steps">
+        <li><span>Open the downloaded <b>.dmg</b> and drag LumaGrader Photo Studio into Applications.</span></li>
+        <li><span>Open the app from Applications. When macOS says it could not verify it, click <b>Done</b>.</span></li>
+        <li><span>Go to <b>System Settings › Privacy &amp; Security</b>, scroll down, and click <b>Open Anyway</b>.</span></li>
+        <li><span>Enter your Mac password and click <b>Open Anyway</b> again. From now on it opens normally.</span></li>
+      </ol>
+      <div class="damaged">
+        <p>If macOS says the app <b>is damaged</b>, it's the same check worded differently. Paste this in Terminal, press Return, then open the app:</p>
+        <div class="cmd">
+          <code id="xattr-cmd">xattr -dr com.apple.quarantine "/Applications/LumaGrader Photo Studio.app"</code>
+          <button type="button" class="copy" data-copy="xattr-cmd">Copy</button>
+        </div>
+        <p class="hint">On macOS 14 Sonoma you can instead right-click the app in Applications and choose Open.</p>
+      </div>
+    </section>
+
+    <section class="open" aria-labelledby="open-title">
+      <div>
+        <h2 id="open-title">Free and open source</h2>
+        <p>The full source code is on GitHub under the GPL-3.0 license. Read it, build it yourself, report a bug or suggest a feature. If the app saves you time, a coffee on Ko-fi keeps it going.</p>
+        <p class="links">
+          <a href="https://github.com/RMalayte/lumagrader-photo-studio" rel="noopener">View the source on GitHub</a>
+          <a href="https://ko-fi.com/lumagrader" rel="noopener" data-kofi>Support on Ko-fi</a>
+        </p>
+      </div>
+      <div>
+        <h2>Editing on a phone or PC?</h2>
+        <p>The LumaGrader web editor still runs in any browser, no install needed. Projects and presets you saved before are still there.</p>
+        <p class="links"><a href="editor/">Open the web editor</a></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <p>© 2026 LumaGrader. Made in the Philippines by Rax, Malayte Photo and Films.</p>
+    <p>LumaGrader is not affiliated with Apple or Canon.</p>
+  </footer>
+
+  <dialog class="thanks" id="thanks" aria-labelledby="thanks-title">
+    <form method="dialog">
+      <h2 id="thanks-title">Your download has started</h2>
+      <p id="thanks-file">Look for it in your Downloads folder.</p>
+      <p>LumaGrader is free and made by one photographer. If it helps your work, you can support it on Ko-fi.</p>
+      <div class="thanks-actions">
+        <a class="btn-support" href="https://ko-fi.com/lumagrader" rel="noopener" target="_blank" data-kofi>Support on Ko-fi</a>
+        <a class="thanks-help" href="#first-open" data-close>How to open it the first time</a>
+      </div>
+      <p class="thanks-retry">Download didn't start? <a id="thanks-retry" href="https://github.com/RMalayte/lumagrader-photo-studio/releases/latest">Try again</a>.</p>
+      <button class="close" value="close" aria-label="Close">×</button>
+    </form>
+  </dialog>
+
+  <script type="module" src="/src/home/home.js"></script>
 </body>
 </html>
