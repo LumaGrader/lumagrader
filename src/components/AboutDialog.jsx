@@ -7,7 +7,7 @@ import logo from '../assets/logo-wordmark.webp'
 import { kofiUrl } from '../config'
 import Icon from './Icon.jsx'
 
-const REPO = 'https://github.com/RMalayte/lumagrader'
+const REPO = 'https://github.com/LumaGrader/lumagrader'
 
 export default function AboutDialog({ onClose }) {
   const closeRef = useRef(null)

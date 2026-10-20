@@ -3,7 +3,7 @@
 // the GitHub releases page.
 import '@fontsource-variable/archivo/wdth.css'
 
-const REPO = 'RMalayte/lumagrader-photo-studio'
+const REPO = 'LumaGrader/photo-studio'
 const RELEASES_PAGE = `https://github.com/${REPO}/releases/latest`
 const KOFI_USERNAME = 'lumagrader' // ko-fi.com/lumagrader, same page as the Mac app
 

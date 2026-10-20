@@ -244,10 +244,10 @@ supports, and the app tells you when that happens.
   **Try GPU again** button sits on the photo, and the app retries by itself when you come back
   to it. *About → Diagnostics* shows which mode the preview is in.
 - **"RAW preview" badge:** this RAW couldn't be decoded, so the camera's embedded JPEG is used.
-  Please [report it](https://github.com/RMalayte/lumagrader/issues) with the camera model.
+  Please [report it](https://github.com/LumaGrader/lumagrader/issues) with the camera model.
 - **Masks do nothing:** masks need WebGL. Turn on hardware acceleration in your browser settings,
   and tap **Try GPU again** if the app switched to compatibility mode.
-- **Something else?** [Report a problem](https://github.com/RMalayte/lumagrader/issues). Please
+- **Something else?** [Report a problem](https://github.com/LumaGrader/lumagrader/issues). Please
   include your device, browser and what you did.
 
 ---

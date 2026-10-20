@@ -3,7 +3,7 @@
 This repo is **lumagrader.app**:
 
 - **`/`**: the download site for **LumaGrader Photo Studio**, the free, open-source Mac app
-  (source: [RMalayte/lumagrader-photo-studio](https://github.com/RMalayte/lumagrader-photo-studio)).
+  (source: [LumaGrader/photo-studio](https://github.com/LumaGrader/photo-studio)).
   `index.html` + `src/home/` (no framework). The Download button finds the newest `.dmg` in that
   repo's GitHub Releases and then shows a thank-you card with the Ko-fi link.
 - **`/editor/`**: the **LumaGrader web editor**, a free RAW and JPEG photo editor that runs
