@@ -10,3 +10,7 @@ public/editor/libraw/
 *.log
 .DS_Store
 Thumbs.db
+
+# website editor build (npm run build:editor)
+dist-editor/
+editor-pack/
