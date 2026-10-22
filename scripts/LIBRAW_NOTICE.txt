@@ -1,4 +1,4 @@
-LumaGrader by Rax — third-party software used for RAW decoding
+LumaGrader — third-party software used for RAW decoding
 ================================================================
 
 This folder contains a WebAssembly build of LibRaw, loaded only when a RAW file is opened.
