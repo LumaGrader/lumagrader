@@ -5,7 +5,7 @@ import { getLocalBaseMap, sampleLocalBase } from './localBase'
 import { prepareSource } from './sourcePrep'
 import { HSL_BANDS } from './hsl'
 import { wbMatrixFor, isGradeActive, gradeUniforms, applyGrade, grainAmplitude, grainCells, grainAt, vignetteParams, vignetteWeight, applyVignette, satVibFactor, scaleChroma, lumaOf, linearToOklab, oklabToLinear } from './color'
-import { buildToneLUT, buildZoneLUT, sampleZoneLUT, toneRGB, buildHSLTable, sampleHSLTable, colorMatrix, isGlobalToneActive, isLocalActive, ZONE } from './lrModel'
+import { buildToneLUT, buildZoneLUT, sampleZoneLUT, toneRGB, pointCurvesProPhoto, buildHSLTable, sampleHSLTable, colorMatrix, isGlobalToneActive, isLocalActive, ZONE } from './lrModel'
 import { getProfileBias } from './colorProfiles'
 import { renderTonalWebGL } from './webgl/renderer'
 
@@ -205,7 +205,6 @@ function renderTonalCanvas2D(canvas, src, s, luts = {}) {
 
       // LUT lookups need integer indices.
       if (curveLut) { r = curveLut[idx255(r)] / 255; g = curveLut[idx255(g)] / 255; b = curveLut[idx255(b)] / 255 }
-      if (curvePointsLut) { r = curvePointsLut.r[idx255(r)] / 255; g = curvePointsLut.g[idx255(g)] / 255; b = curvePointsLut.b[idx255(b)] / 255 }
 
       if (cubeLut) {
         const ri = Math.round(Math.min(1, Math.max(0, r)) * n), gi = Math.round(Math.min(1, Math.max(0, g)) * n), bi = Math.round(Math.min(1, Math.max(0, b)) * n)
@@ -228,6 +227,9 @@ function renderTonalCanvas2D(canvas, src, s, luts = {}) {
           r = srgbEncode(fr); g = srgbEncode(fg); b = srgbEncode(fb)
         }
       }
+
+      // Point curves on ProPhoto channels, after the Color Mixer (as in Lightroom).
+      if (curvePointsLut) [r, g, b] = pointCurvesProPhoto(Math.min(1, Math.max(0, r)), Math.min(1, Math.max(0, g)), Math.min(1, Math.max(0, b)), curvePointsLut)
 
       if (grade) [r, g, b] = applyGrade(r, g, b, grade)
 

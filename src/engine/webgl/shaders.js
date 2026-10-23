@@ -263,14 +263,6 @@ void main() {
     c = clamp(mix(lo, hi, step(0.5, x)), 0.0, 1.0);
   }
 
-  if (u_useCurvePoints) {
-    // 256-texel LUT: map 0..1 onto texel centers so linear filtering interpolates exactly.
-    vec3 cu = (clamp(c, 0.0, 1.0) * 255.0 + 0.5) / 256.0;
-    c.r = texture(u_curvePointsLUT, vec2(cu.r, 0.5)).r;
-    c.g = texture(u_curvePointsLUT, vec2(cu.g, 0.5)).g;
-    c.b = texture(u_curvePointsLUT, vec2(cu.b, 0.5)).b;
-  }
-
   if (u_useCubeLut) {
     vec3 graded = texture(u_cubeLut, c).rgb;
     c = mix(c, graded, u_lutStrength);
@@ -291,6 +283,17 @@ void main() {
       o = vec3(o.x * exp(e.z), cos(hr) * c2, sin(hr) * c2);
       c = linearToSrgb(fitGamut(max(oklabToLinear(o), 0.0)));
     }
+  }
+
+  if (u_useCurvePoints) {
+    // Point curves on ProPhoto RGB (sRGB-encoded) channels, after the Color Mixer, like
+    // Lightroom (lrModel.pointCurvesProPhoto). 256-texel LUT: map 0..1 onto texel centers.
+    vec3 pp = linearToSrgb(clamp(SRGB_TO_PROPHOTO * srgbToLinear(clamp(c, 0.0, 1.0)), 0.0, 1.0));
+    vec3 cu = (pp * 255.0 + 0.5) / 256.0;
+    vec3 o = vec3(texture(u_curvePointsLUT, vec2(cu.r, 0.5)).r,
+                  texture(u_curvePointsLUT, vec2(cu.g, 0.5)).g,
+                  texture(u_curvePointsLUT, vec2(cu.b, 0.5)).b);
+    c = linearToSrgb(clamp(PROPHOTO_TO_SRGB * srgbToLinear(o), 0.0, 1.0));
   }
 
   if (u_gradeActive) c = applyGrade(c);

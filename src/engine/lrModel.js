@@ -115,6 +115,26 @@ export function toneRGB(r, g, b, lut) {
   ]
 }
 
+/**
+ * Point curves (RGB + R/G/B, 256-entry 0…255 tables) on ProPhoto RGB (sRGB-encoded) channels,
+ * like Lightroom. In and out: sRGB-encoded 0…1.
+ */
+export function pointCurvesProPhoto(r, g, b, luts) {
+  const lr = dec(r), lg = dec(g), lb = dec(b)
+  const p = [
+    enc(clamp01(S2PP[0] * lr + S2PP[1] * lg + S2PP[2] * lb)),
+    enc(clamp01(S2PP[3] * lr + S2PP[4] * lg + S2PP[5] * lb)),
+    enc(clamp01(S2PP[6] * lr + S2PP[7] * lg + S2PP[8] * lb)),
+  ]
+  const idx = (v) => Math.min(255, Math.max(0, Math.round(v * 255)))
+  const l = [dec(luts.r[idx(p[0])] / 255), dec(luts.g[idx(p[1])] / 255), dec(luts.b[idx(p[2])] / 255)]
+  return [
+    enc(clamp01(PP2S[0] * l[0] + PP2S[1] * l[1] + PP2S[2] * l[2])),
+    enc(clamp01(PP2S[3] * l[0] + PP2S[4] * l[1] + PP2S[5] * l[2])),
+    enc(clamp01(PP2S[6] * l[0] + PP2S[7] * l[1] + PP2S[8] * l[2])),
+  ]
+}
+
 // ---- Shadows / Highlights ---------------------------------------------------------------
 
 export const isLocalActive = (t) => !!(t.shadows || t.highlights)

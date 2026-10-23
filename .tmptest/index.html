@@ -1,0 +1,17 @@
+<!doctype html><html><body><script type="module">
+import { makePreviewSource, renderImage } from '../src/engine/pipeline.js'
+import { parseXmpPreset } from '../src/engine/xmpPreset.js'
+window.run = async () => {
+  const img = new Image(); img.src = './img.jpg'; await img.decode()
+  const src = makePreviewSource(img, 900)
+  const xmp = await (await fetch('./w.xmp')).text()
+  const p = parseXmpPreset(xmp, 'W.xmp'); const s = p.settings || p
+  const out = {}
+  for (const [k, force] of [['gpu', false], ['cpu', true]]) {
+    const c = document.createElement('canvas'); renderImage(c, src, s, {}, { forceCanvas: force })
+    const t = document.createElement('canvas'); t.width = c.width; t.height = c.height; const tc = t.getContext('2d', { willReadFrequently: true }); tc.drawImage(c, 0, 0); const d = tc.getImageData(0, 0, c.width, c.height).data
+    out[k] = Array.from(d); out.w = c.width; out.h = c.height
+  }
+  return out
+}
+</script></body></html>
