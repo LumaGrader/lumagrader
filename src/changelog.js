@@ -5,6 +5,14 @@ export const POPUP_FROM = '0.9.4'
 
 export const CHANGELOG = [
   {
+    version: '1.1.1',
+    date: '2026-10-24',
+    title: 'Tone curves',
+    items: [
+      'Presets with Red, Green or Blue tone curves now look like they do in the editor they were made in.',
+    ],
+  },
+  {
     version: '1.1.0',
     date: '2026-10-23',
     title: 'Presets look right',
