@@ -1,10 +1,11 @@
 import { buildCurveLUT } from './curve'
 import { buildRgbCurveLUTs } from './curvePoints'
-import { isToneActive, isLocalToneActive, buildLocalLUT, buildGlobalLUT, sampleLUT, applyRatioLinear, luminance, srgbDecode, srgbEncode } from './tone'
+import { applyRatioLinear, luminance, srgbDecode, srgbEncode } from './tone'
 import { getLocalBaseMap, sampleLocalBase } from './localBase'
 import { prepareSource } from './sourcePrep'
 import { HSL_BANDS } from './hsl'
-import { wbMatrixFor, isGradeActive, gradeUniforms, applyGrade, grainAmplitude, grainCells, grainAt, vignetteParams, vignetteWeight, applyVignette, satVibFactor, scaleChroma, hueSat, withHue, hslBandWeights, neutralFade, lumaOf, HSL_HUE_DEG, HSL_LUM_EV } from './color'
+import { wbMatrixFor, isGradeActive, gradeUniforms, applyGrade, grainAmplitude, grainCells, grainAt, vignetteParams, vignetteWeight, applyVignette, satVibFactor, scaleChroma, lumaOf, linearToOklab, oklabToLinear } from './color'
+import { buildToneLUT, buildZoneLUT, sampleZoneLUT, toneRGB, buildHSLTable, sampleHSLTable, colorMatrix, isGlobalToneActive, isLocalActive, ZONE } from './lrModel'
 import { getProfileBias } from './colorProfiles'
 import { renderTonalWebGL } from './webgl/renderer'
 
@@ -88,6 +89,13 @@ export function renderToCanvas(target, source, s, luts = {}, { allowCanvasFallba
   return target
 }
 
+/** Row-major 3×3 product a·b. */
+function multiply3(a, b) {
+  const o = new Array(9)
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c]
+  return o
+}
+
 // sRGB byte → linear, and linear → sRGB byte, for the 2D fallback's tone step.
 const DECODE_LUT = Float32Array.from({ length: 256 }, (_, i) => srgbDecode(i / 255))
 const ENCODE_LUT = Uint8ClampedArray.from({ length: 4096 }, (_, i) => Math.round(srgbEncode(i / 4095) * 255))
@@ -104,18 +112,24 @@ function renderTonalCanvas2D(canvas, src, s, luts = {}) {
   const ctx = canvas.getContext('2d')
 
   const profile = getProfileBias(s.colorProfile)
-  const sat = Math.max(-1, (s.saturation + (profile.saturation || 0)) / 100)
   const vib = (s.vibrance || 0) / 100
-  const satOn = sat !== 0 || vib !== 0
+  const satOn = vib !== 0 // Saturation is part of the colour matrix below
   const profileContrast = profile.contrast || 0
-  // Same tone table as the WebGL path (tone.js), so both renderers match.
-  const toneOn = isToneActive(s, profileContrast)
-  const localLut = toneOn && isLocalToneActive(s) ? buildLocalLUT(s) : null
-  const globalLut = toneOn ? buildGlobalLUT(s, profileContrast) : null
-  const baseMap = localLut ? getLocalBaseMap(src) : null
-  const ev = s.exposure || 0
-  const wb = wbMatrixFor(s, profile.temp || 0)
-  const linearOn = toneOn || !!wb
+  // Same Lightroom-matched tables as the WebGL path (lrModel.js), so both renderers match.
+  const tone = {
+    exposure: s.exposure || 0, blacks: s.blacks || 0, whites: s.whites || 0,
+    contrast: Math.max(-100, Math.min(100, (s.contrast || 0) + profileContrast)),
+    shadows: s.shadows || 0, highlights: s.highlights || 0,
+  }
+  const toneOn = isGlobalToneActive(tone)
+  const toneLut = toneOn ? buildToneLUT(tone) : null
+  const zoneLut = isLocalActive(tone) ? buildZoneLUT(tone) : null
+  const baseMap = zoneLut ? getLocalBaseMap(src) : null
+  const ev = tone.exposure
+  const wbOnly = wbMatrixFor(s, profile.temp || 0)
+  const cm = colorMatrix(Math.max(-100, s.saturation + (profile.saturation || 0)), s.calibration)
+  const wb = cm && wbOnly ? multiply3(cm, wbOnly) : cm || wbOnly
+  const linearOn = toneOn || !!zoneLut || !!wb
   const dehaze = (s.dehaze || 0) / 100
   ctx.clearRect(0, 0, w, h) // the canvas is no longer reset by resizing (transparent PNGs)
   ctx.drawImage(src, 0, 0)
@@ -123,14 +137,15 @@ function renderTonalCanvas2D(canvas, src, s, luts = {}) {
   const curveLut = s.curve ? buildCurveLUT(s.curve) : null
   const curvePointsLut = buildRgbCurveLUTs(s) // RGB + R/G/B point curves, or null
   const cubeLut = s.lut && luts[s.lut] ? luts[s.lut] : null
-  // HSL per band (user + profile bias), in the band order of color.js / the shader.
-  const hslH = [], hslS = [], hslL = []
+  // Color Mixer per band (user + profile bias) → the same hue × chroma table as the shader.
+  const bands = { hue: [], sat: [], lum: [] }
   HSL_BANDS.forEach((band) => {
     const b = (s.hsl && s.hsl[band]) || { h: 0, s: 0, l: 0 }
     const bias = (profile.hsl && profile.hsl[band]) || {}
-    hslH.push(b.h + (bias.h || 0)); hslS.push(b.s + (bias.s || 0)); hslL.push(b.l + (bias.l || 0))
+    bands.hue.push(b.h + (bias.h || 0)); bands.sat.push(b.s + (bias.s || 0)); bands.lum.push(b.l + (bias.l || 0))
   })
-  const hslActive = [...hslH, ...hslS, ...hslL].some((v) => v)
+  const hslActive = [...bands.hue, ...bands.sat, ...bands.lum].some((v) => v)
+  const hslTable = hslActive ? buildHSLTable(bands) : null
   const grainAmt = s.grain > 0 ? grainAmplitude(s.grain) : 0
   const [cellsX, cellsY] = grainCells(w, h, s.grainSize ?? 25)
   const grainRough = (s.grainRoughness ?? 50) / 100
@@ -156,22 +171,26 @@ function renderTonalCanvas2D(canvas, src, s, luts = {}) {
           const B = wb[6] * lr + wb[7] * lg + wb[8] * lb
           lr = Math.max(0, R); lg = Math.max(0, G); lb = Math.max(0, B)
         }
-        let ratio = 1
-        if (toneOn) {
+        if (zoneLut) {
           const Y0 = luminance(lr, lg, lb)
-          const v0 = Math.log2(Math.max(Y0, 1e-6))
-          let v1 = v0 + ev
-          if (localLut) {
+          if (Y0 > 1e-8) {
             const px = (i >> 2) % w, py = ((i >> 2) / w) | 0
             const [A, B] = sampleLocalBase(baseMap, (px + 0.5) / w, (py + 0.5) / h)
-            v1 += sampleLUT(localLut, A * v0 + B + ev)
+            const v0 = Math.max(Math.log2(Y0), -14)
+            const base = Math.min(6, Math.max(-14, A * v0 + B))
+            const v = Math.min(6, Math.max(-14, ZONE.mix * base + (1 - ZONE.mix) * v0)) + ev
+            const [gs, gh] = sampleZoneLUT(zoneLut, v)
+            const k = Math.pow(2, gs + gh)
+            const enc = (y) => (y <= 0.0031308 ? y * 12.92 : 1.055 * Math.pow(y, 1 / 2.4) - 0.055)
+            const [cr, cg, cb] = scaleChroma(enc(lr * k), enc(lg * k), enc(lb * k), Math.pow(2, -ZONE.shadowsChroma * gs - ZONE.highlightsChroma * gh))
+            lr = srgbDecode(Math.max(0, cr)); lg = srgbDecode(Math.max(0, cg)); lb = srgbDecode(Math.max(0, cb))
           }
-          ratio = (Math.pow(2, v1) * sampleLUT(globalLut, v1)) / Math.max(Y0, 1e-6)
         }
-        const [nr, ng, nb] = applyRatioLinear(lr, lg, lb, ratio) // includes the gamut fit
+        if (toneLut) [lr, lg, lb] = toneRGB(lr, lg, lb, toneLut)
+        const [nr, ng, nb] = applyRatioLinear(lr, lg, lb, 1) // gamut fit
         r = encode255(nr) / 255; g = encode255(ng) / 255; b = encode255(nb) / 255
       }
-      if (satOn) [r, g, b] = scaleChroma(r, g, b, satVibFactor(r, g, b, sat, vib))
+      if (satOn) [r, g, b] = scaleChroma(r, g, b, satVibFactor(r, g, b, 0, vib))
 
       if (dehaze > 0) {
         r = (r - 0.5) * (1 + dehaze * 0.6) + 0.5; g = (g - 0.5) * (1 + dehaze * 0.6) + 0.5; b = (b - 0.5) * (1 + dehaze * 0.6) + 0.5
@@ -197,20 +216,16 @@ function renderTonalCanvas2D(canvas, src, s, luts = {}) {
       }
 
       if (hslActive) {
-        const [hue, hs] = hueSat(r, g, b)
-        const fade = neutralFade(hs)
-        if (fade > 0) {
-          const [i0, i1, w0, w1] = hslBandWeights(hue)
-          const dh = (hslH[i0] * w0 + hslH[i1] * w1) * fade
-          const ds = (hslS[i0] * w0 + hslS[i1] * w1) * fade
-          const dl = (hslL[i0] * w0 + hslL[i1] * w1) * fade
-          if (dh) [r, g, b] = withHue(r, g, b, hue + (dh / 100) * HSL_HUE_DEG)
-          if (ds) [r, g, b] = scaleChroma(r, g, b, 1 + ds / 100)
-          if (dl) {
-            const gain = Math.pow(2, (dl / 100) * HSL_LUM_EV)
-            const [nr, ng, nb] = applyRatioLinear(srgbDecode(Math.max(0, r)), srgbDecode(Math.max(0, g)), srgbDecode(Math.max(0, b)), gain)
-            r = srgbEncode(nr); g = srgbEncode(ng); b = srgbEncode(nb)
-          }
+        const [L, a, bb] = linearToOklab(srgbDecode(Math.max(0, r)), srgbDecode(Math.max(0, g)), srgbDecode(Math.max(0, b)))
+        const cc = Math.hypot(a, bb)
+        if (cc > 1e-5) {
+          let hd = (Math.atan2(bb, a) * 180) / Math.PI
+          if (hd < 0) hd += 360
+          const [dh, lc, ll] = sampleHSLTable(hslTable, hd, cc)
+          const hr = ((hd + dh) * Math.PI) / 180, c2 = cc * Math.exp(lc)
+          const [nr, ng, nb] = oklabToLinear(L * Math.exp(ll), Math.cos(hr) * c2, Math.sin(hr) * c2)
+          const [fr, fg, fb] = applyRatioLinear(Math.max(0, nr), Math.max(0, ng), Math.max(0, nb), 1)
+          r = srgbEncode(fr); g = srgbEncode(fg); b = srgbEncode(fb)
         }
       }
 

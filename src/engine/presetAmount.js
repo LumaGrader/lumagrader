@@ -78,6 +78,16 @@ function blendGrade(a, b, t) {
   return out
 }
 
+function blendCalibration(a, b, t) {
+  if (!a && !b) return b ?? a ?? null
+  const out = {}
+  for (const key of new Set([...Object.keys(a || {}), ...Object.keys(b || {})])) {
+    const v = blendNumber('calibration', a?.[key] ?? 0, b?.[key] ?? 0, t)
+    if (v) out[key] = v
+  }
+  return Object.keys(out).length ? out : null
+}
+
 /** RAW white balance: null means As Shot. Kelvin blends in mired (perceptually even). */
 function blendWB(a, b, t, asShot) {
   if (!asShot) return b ?? null
@@ -103,6 +113,7 @@ export function blendPresetSettings(before, full, t, asShot = null) {
     else if (key === 'wb') out.wb = blendWB(a, b, t, asShot)
     else if (key === 'hsl') out.hsl = blendHsl(a, b, t)
     else if (key === 'colorGrade') out.colorGrade = blendGrade(a, b, t)
+    else if (key === 'calibration') out.calibration = blendCalibration(a, b, t)
     else if (CURVE_KEYS.includes(key)) out[key] = blendCurve(a, b, t)
     else if (typeof b === 'number' || typeof a === 'number') out[key] = blendNumber(key, Number(a), Number(b), t)
     // Profile, LUT, on/off switches: the preset's choice as soon as any of it is applied.

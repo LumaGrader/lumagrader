@@ -410,26 +410,7 @@ export function satVibFactor(r, g, b, sat, vib) {
   return k
 }
 
-// HSL bands (must match HSL_BANDS order in hsl.js and the shader).
-export const HSL_CENTERS = [0, 30, 60, 120, 180, 240, 275, 320]
-export const HSL_HUE_DEG = 30 // hue ±100 → ±30°
-export const HSL_LUM_EV = 1.2 // luminance ±100 → ±1.2 EV
-
-/** Weights for the two bands surrounding hue h (they sum to 1): [i, j, wi, wj]. */
-export function hslBandWeights(h) {
-  const n = HSL_CENTERS.length
-  for (let i = 0; i < n; i++) {
-    const a = HSL_CENTERS[i]
-    const b = i === n - 1 ? 360 : HSL_CENTERS[i + 1]
-    if (h >= a && h < b) {
-      const t = smoothstep(0, 1, (h - a) / (b - a))
-      return [i, (i + 1) % n, 1 - t, t]
-    }
-  }
-  return [0, 1, 1, 0]
-}
-
-export const neutralFade = (s) => smoothstep(0.03, 0.2, s)
+// Color Mixer (HSL): Lightroom-matched hue × chroma tables, see lrModel.js.
 
 /** Rebuilds RGB from hue (deg) keeping the pixel's max and min channel (HSV V and chroma). */
 export function withHue(r, g, b, h) {

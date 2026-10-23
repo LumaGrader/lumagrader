@@ -5,14 +5,15 @@ import { brushMaskSource } from '../brushMaskStore'
 import { rangeUniforms } from '../masks'
 import { getProfileBias } from '../colorProfiles'
 import { wbMatrixFor, isGradeActive, gradeUniforms, grainAmplitude, grainCells, vignetteParams } from '../color'
-import { buildLocalLUT, buildGlobalLUT, isToneActive, isLocalToneActive, LOCAL_LUT_SIZE, GLOBAL_LUT_SIZE } from '../tone'
+import { buildToneLUT, buildZoneLUT, buildHSLTable, colorMatrix, isGlobalToneActive, isLocalActive, TONE_LUT_SIZE, ZONE_LUT_SIZE, HSL_TABLE_WIDTH, HSL_TABLE_ROWS, ZONE } from '../lrModel'
 import { getLocalBaseMap } from '../localBase'
 
 const HSL_ORDER = ['red', 'orange', 'yellow', 'green', 'aqua', 'blue', 'purple', 'magenta']
 const MAIN_UNIFORM_NAMES = [
   'u_image', 'u_curvePointsLUT', 'u_cubeLut', 'u_useCubeLut', 'u_useCurvePoints',
-  'u_localLUT', 'u_globalLUT', 'u_gfCoef', 'u_useTone', 'u_useLocal', 'u_exposureEV', 'u_sat', 'u_useWB', 'u_wbMatrix', 'u_curveStrength',
-  'u_lutStrength', 'u_hslHue', 'u_hslSat', 'u_hslLum', 'u_hslActive', 'u_vibrance',
+  'u_localLUT', 'u_globalLUT', 'u_gfCoef', 'u_hslTable', 'u_useTone', 'u_useLocal', 'u_exposureEV',
+  'u_zoneMix', 'u_zoneChroma', 'u_zoneRange', 'u_sat', 'u_useWB', 'u_wbMatrix', 'u_curveStrength',
+  'u_lutStrength', 'u_hslActive', 'u_vibrance',
   'u_gradeActive', 'u_gradeTint', 'u_gradeLum', 'u_gradeBlend', 'u_gradeBalance',
   'u_grain', 'u_grainCells', 'u_grainRough', 'u_vignette', 'u_vigParams', 'u_resolution', 'u_dehaze',
 ]
@@ -88,9 +89,10 @@ function getState(canvas) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]))
 
-  // Tone tables (R16F — filterable in WebGL2 without extensions):
-  //   localTex  (unit 3): base EV → Highlights/Shadows gain      globalTex (unit 4): EV → out ÷ 2^EV
-  //   gfTex     (unit 5): guided-filter (A, B) map for the edge-aware local base (RG16F)
+  // Model tables (half float — filterable in WebGL2 without extensions), see lrModel.js:
+  //   localTex (unit 3, RG16F): zone → (Shadows, Highlights) gain   globalTex (unit 4, R16F): tone curve
+  //   gfTex    (unit 5, RG16F): guided-filter (A, B) map for the edge-aware local base
+  //   hslTex   (unit 6, RGBA16F): Color Mixer hue × chroma table
   const makeFloatTex = (internal, format, data, w = 1) => {
     const t = gl.createTexture()
     gl.bindTexture(gl.TEXTURE_2D, t)
@@ -101,9 +103,10 @@ function getState(canvas) {
     gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, 1, 0, format, gl.FLOAT, data)
     return t
   }
-  const localTex = makeFloatTex(gl.R16F, gl.RED, new Float32Array([0]))
-  const globalTex = makeFloatTex(gl.R16F, gl.RED, new Float32Array([1]))
+  const localTex = makeFloatTex(gl.RG16F, gl.RG, new Float32Array([0, 0]))
+  const globalTex = makeFloatTex(gl.R16F, gl.RED, new Float32Array([0]))
   const gfTex = makeFloatTex(gl.RG16F, gl.RG, new Float32Array([0, 0]))
+  const hslTex = makeFloatTex(gl.RGBA16F, gl.RGBA, new Float32Array([0, 0, 0, 1]))
 
   const cubeTex = gl.createTexture()
   gl.bindTexture(gl.TEXTURE_3D, cubeTex)
@@ -172,12 +175,19 @@ function getState(canvas) {
 
   state = {
     gl, program, blurProgram, combineProgram, maskProgram, detailProgram, quad,
-    imageTex, curveTex, localTex, globalTex, gfTex, cubeTex, brushTex, uniforms, blurUniforms, combineUniforms, maskUniforms, detailUniforms,
+    imageTex, curveTex, localTex, globalTex, gfTex, hslTex, cubeTex, brushTex, uniforms, blurUniforms, combineUniforms, maskUniforms, detailUniforms,
     cachedLutName: null,
     targetA: {}, targetB: {}, targetC: {}, targetD: {}, targetE: {}, targetF: {},
   }
   stateMap.set(canvas, state)
   return state
+}
+
+/** Row-major 3×3 product a·b. */
+function multiply3(a, b) {
+  const o = new Array(9)
+  for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) o[r * 3 + c] = a[r * 3] * b[c] + a[r * 3 + 1] * b[3 + c] + a[r * 3 + 2] * b[6 + c]
+  return o
 }
 
 function setMainUniforms(state, s, luts, source, w, h) {
@@ -225,22 +235,29 @@ function setMainUniforms(state, s, luts, source, w, h) {
   const effSaturation = s.saturation + (profile.saturation || 0)
   const profileContrast = profile.contrast || 0
 
-  // Tone tables are rebuilt only when a tone slider (or the profile's contrast) changes;
+  // Lightroom-matched tone (lrModel.js). Tables are rebuilt only when their sliders change;
   // the local-base map only when the source pixels change (cached per source object).
-  const toneOn = isToneActive(s, profileContrast)
-  const localOn = toneOn && isLocalToneActive(s)
+  const tone = {
+    exposure: s.exposure || 0, blacks: s.blacks || 0, whites: s.whites || 0,
+    contrast: Math.max(-100, Math.min(100, (s.contrast || 0) + profileContrast)),
+    shadows: s.shadows || 0, highlights: s.highlights || 0,
+  }
+  const toneOn = isGlobalToneActive(tone)
+  const localOn = isLocalActive(tone)
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false)
-  if (toneOn) {
-    const key = [s.exposure, s.contrast, profileContrast, s.highlights, s.shadows, s.whites, s.blacks].join('|')
-    if (state.toneKey !== key) {
-      gl.activeTexture(gl.TEXTURE3)
-      gl.bindTexture(gl.TEXTURE_2D, state.localTex)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, LOCAL_LUT_SIZE, 1, 0, gl.RED, gl.FLOAT, buildLocalLUT(s))
-      gl.activeTexture(gl.TEXTURE4)
-      gl.bindTexture(gl.TEXTURE_2D, state.globalTex)
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, GLOBAL_LUT_SIZE, 1, 0, gl.RED, gl.FLOAT, buildGlobalLUT(s, profileContrast))
-      state.toneKey = key
-    }
+  const toneKey = [tone.exposure, tone.blacks, tone.whites, tone.contrast].join('|')
+  if (toneOn && state.toneKey !== toneKey) {
+    gl.activeTexture(gl.TEXTURE4)
+    gl.bindTexture(gl.TEXTURE_2D, state.globalTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, TONE_LUT_SIZE, 1, 0, gl.RED, gl.FLOAT, buildToneLUT(tone))
+    state.toneKey = toneKey
+  }
+  const zoneKey = [tone.shadows, tone.highlights].join('|')
+  if (localOn && state.zoneKey !== zoneKey) {
+    gl.activeTexture(gl.TEXTURE3)
+    gl.bindTexture(gl.TEXTURE_2D, state.localTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG16F, ZONE_LUT_SIZE, 1, 0, gl.RG, gl.FLOAT, buildZoneLUT(tone))
+    state.zoneKey = zoneKey
   }
   if (localOn) {
     const map = getLocalBaseMap(source)
@@ -251,42 +268,56 @@ function setMainUniforms(state, s, luts, source, w, h) {
       state.gfMap = map
     }
   }
+
+  // Color Mixer: band values (user + profile bias) → hue × chroma table.
+  const bands = { hue: [], sat: [], lum: [] }
+  HSL_ORDER.forEach((band) => {
+    const b = (s.hsl && s.hsl[band]) || { h: 0, s: 0, l: 0 }
+    const bias = (profile.hsl && profile.hsl[band]) || {}
+    bands.hue.push(b.h + (bias.h || 0))
+    bands.sat.push(b.s + (bias.s || 0))
+    bands.lum.push(b.l + (bias.l || 0))
+  })
+  const hslActive = [...bands.hue, ...bands.sat, ...bands.lum].some((v) => v)
+  const hslKey = JSON.stringify(bands)
+  if (hslActive && state.hslKey !== hslKey) {
+    gl.activeTexture(gl.TEXTURE6)
+    gl.bindTexture(gl.TEXTURE_2D, state.hslTex)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, HSL_TABLE_WIDTH, HSL_TABLE_ROWS, 0, gl.RGBA, gl.FLOAT, buildHSLTable(bands))
+    state.hslKey = hslKey
+  }
+
   gl.activeTexture(gl.TEXTURE3)
   gl.bindTexture(gl.TEXTURE_2D, state.localTex)
   gl.activeTexture(gl.TEXTURE4)
   gl.bindTexture(gl.TEXTURE_2D, state.globalTex)
   gl.activeTexture(gl.TEXTURE5)
   gl.bindTexture(gl.TEXTURE_2D, state.gfTex)
+  gl.activeTexture(gl.TEXTURE6)
+  gl.bindTexture(gl.TEXTURE_2D, state.hslTex)
   gl.uniform1i(uniforms.u_localLUT, 3)
   gl.uniform1i(uniforms.u_globalLUT, 4)
   gl.uniform1i(uniforms.u_gfCoef, 5)
+  gl.uniform1i(uniforms.u_hslTable, 6)
   gl.uniform1i(uniforms.u_useTone, toneOn ? 1 : 0)
   gl.uniform1i(uniforms.u_useLocal, localOn ? 1 : 0)
-  gl.uniform1f(uniforms.u_exposureEV, s.exposure || 0)
-  gl.uniform1f(uniforms.u_sat, Math.max(-1, effSaturation / 100))
-  // White balance: Bradford adaptation matrix in linear light — see color.js.
+  gl.uniform1f(uniforms.u_exposureEV, tone.exposure)
+  gl.uniform1f(uniforms.u_zoneMix, ZONE.mix)
+  gl.uniform2f(uniforms.u_zoneChroma, ZONE.shadowsChroma, ZONE.highlightsChroma)
+  gl.uniform2f(uniforms.u_zoneRange, ZONE.range[0], ZONE.range[1] - ZONE.range[0])
+  // Saturation (and imported Calibration) are measured colour matrices, combined with the
+  // white balance (Bradford adaptation in linear light — see color.js); Vibrance stays below.
+  gl.uniform1f(uniforms.u_sat, 0)
   const wb = wbMatrixFor(s, profile.temp || 0) // RAW Kelvin/Tint + relative Temp/Tint
-  gl.uniform1i(uniforms.u_useWB, wb ? 1 : 0)
-  if (wb) {
+  const cm = colorMatrix(Math.max(-100, effSaturation), s.calibration)
+  const m = cm && wb ? multiply3(cm, wb) : cm || wb
+  gl.uniform1i(uniforms.u_useWB, m ? 1 : 0)
+  if (m) {
     // GLSL mat3 is column-major: transpose our row-major matrix.
-    gl.uniformMatrix3fv(uniforms.u_wbMatrix, false, new Float32Array([wb[0], wb[3], wb[6], wb[1], wb[4], wb[7], wb[2], wb[5], wb[8]]))
+    gl.uniformMatrix3fv(uniforms.u_wbMatrix, false, new Float32Array([m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]))
   }
   gl.uniform1f(uniforms.u_curveStrength, s.curve || 0)
   gl.uniform1f(uniforms.u_lutStrength, (s.lutStrength || 0) / 100)
-
-  const hueArr = new Float32Array(8), satArr = new Float32Array(8), lumArr = new Float32Array(8)
-  let hslActive = false
-  HSL_ORDER.forEach((band, i) => {
-    const b = (s.hsl && s.hsl[band]) || { h: 0, s: 0, l: 0 }
-    const bias = (profile.hsl && profile.hsl[band]) || {}
-    hueArr[i] = b.h + (bias.h || 0)
-    satArr[i] = b.s + (bias.s || 0)
-    lumArr[i] = b.l + (bias.l || 0)
-    if (hueArr[i] || satArr[i] || lumArr[i]) hslActive = true
-  })
-  gl.uniform1fv(uniforms.u_hslHue, hueArr)
-  gl.uniform1fv(uniforms.u_hslSat, satArr)
-  gl.uniform1fv(uniforms.u_hslLum, lumArr)
   gl.uniform1i(uniforms.u_hslActive, hslActive ? 1 : 0)
   gl.uniform1f(uniforms.u_vibrance, (s.vibrance || 0) / 100)
 

@@ -107,4 +107,7 @@ export const defaultSettings = () => ({
   lutStrength: 100,
   hsl: defaultHsl(),
   colorGrade: defaultColorGrade(),
+  // Lightroom Calibration from imported presets (no panel yet): { redHue, redSaturation,
+  // greenHue, greenSaturation, blueHue, blueSaturation } or null — see lrModel.colorMatrix.
+  calibration: null,
 })

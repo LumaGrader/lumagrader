@@ -129,6 +129,18 @@ function presetFromReader(r, fileName) {
   direct('Vibrance', 'vibrance', 'Vibrance')
   direct('Saturation', 'saturation', 'Saturation')
 
+  // --- Calibration (no panel; applied with the measured Lightroom matrices) --------------
+  const calibration = {}
+  for (const [lr, key] of [['RedHue', 'redHue'], ['RedSaturation', 'redSaturation'], ['GreenHue', 'greenHue'],
+    ['GreenSaturation', 'greenSaturation'], ['BlueHue', 'blueHue'], ['BlueSaturation', 'blueSaturation']]) {
+    const v = r.num(lr)
+    if (v) calibration[key] = Math.round(clamp(v, -100, 100))
+  }
+  if (Object.keys(calibration).length) {
+    s.calibration = calibration
+    applied.push('Calibration')
+  }
+
   // --- White balance -------------------------------------------------------------------
   const incTemp = r.num('IncrementalTemperature')
   const incTint = r.num('IncrementalTint')

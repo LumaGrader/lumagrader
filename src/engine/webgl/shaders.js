@@ -23,12 +23,17 @@ uniform sampler3D u_cubeLut;
 uniform bool u_useCubeLut;
 uniform bool u_useCurvePoints;
 
-uniform sampler2D u_localLUT;  // base EV → Highlights/Shadows gain (EV)      — tone.js
-uniform sampler2D u_globalLUT; // EV → output light ÷ 2^EV (Whites/Blacks/Contrast)
+// Lightroom-matched models — see lrModel.js.
+uniform sampler2D u_localLUT;  // zone value → (Shadows gain, Highlights gain) in EV, 256 wide
+uniform sampler2D u_globalLUT; // display value 0..1 → out: Exposure/Blacks/Whites/Contrast, 1024 wide
 uniform sampler2D u_gfCoef;    // guided-filter (A, B): local base = A·log2(Y) + B — localBase.js
-uniform bool u_useTone;
-uniform bool u_useLocal;
+uniform sampler2D u_hslTable;  // Color Mixer: x = hue (°, 361 wide), y = Oklab chroma 0..0.3 (16 rows)
+uniform bool u_useTone;        // global tone curve
+uniform bool u_useLocal;       // Shadows / Highlights
 uniform float u_exposureEV;
+uniform float u_zoneMix;       // zone = mix · local base + (1 − mix) · pixel (EV)
+uniform vec2 u_zoneChroma;     // chroma follows 2^(−β·gain): (Shadows β, Highlights β)
+uniform vec2 u_zoneRange;      // zone table range: (min EV, span)
 uniform float u_sat;      // Saturation −1..1 (color.js satVibFactor)
 uniform bool u_useWB;
 uniform mat3 u_wbMatrix;  // linear-sRGB white balance (color.js whiteBalanceMatrix)
@@ -37,9 +42,6 @@ uniform float u_curveStrength;
 
 uniform float u_lutStrength;
 
-uniform float u_hslHue[8];
-uniform float u_hslSat[8];
-uniform float u_hslLum[8];
 uniform bool u_hslActive;
 uniform float u_vibrance;
 
@@ -67,10 +69,33 @@ vec3 linearToSrgb(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 
-// Must match tone.js LOG_MIN / LOG_MAX and the LUT sizes.
-float lutCoord(float v, float n) {
-  float t = clamp((v + 14.0) / 20.0, 0.0, 1.0);
-  return t * (n - 1.0) / n + 0.5 / n;
+// Global tone curve (lrModel.toneValue): 1024 texels over 0..1; above 1 it continues with the
+// slope of the last step (RAW headroom).
+float toneLut(float x) {
+  if (x <= 1.0) return texture(u_globalLUT, vec2((max(x, 0.0) * 1023.0 + 0.5) / 1024.0, 0.5)).r;
+  float y1 = texture(u_globalLUT, vec2(1023.5 / 1024.0, 0.5)).r;
+  float y0 = texture(u_globalLUT, vec2(1022.5 / 1024.0, 0.5)).r;
+  return y1 + (x - 1.0) * (y1 - y0) * 1023.0;
+}
+
+// Hue-preserving curve on ProPhoto RGB (sRGB-encoded) channels, like Lightroom: the curve
+// moves the largest and smallest channel, the middle one keeps its relative position.
+// (Matrices written column by column: GLSL mat3 is column-major.)
+const mat3 SRGB_TO_PROPHOTO = mat3(0.5292804, 0.0983662, 0.0168753, 0.3301530, 0.8734640, 0.1176594, 0.1405666, 0.0281698, 0.8654652);
+const mat3 PROPHOTO_TO_SRGB = mat3(2.0343675, -0.2288268, -0.0085584, -0.7276345, 1.2317534, -0.1532682, -0.3067331, -0.0029266, 1.1618266);
+vec3 linearToSrgbOpen(vec3 c) { // like linearToSrgb, but keeps values above 1
+  c = max(c, 0.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+vec3 toneRGB(vec3 lin) {
+  vec3 e = linearToSrgbOpen(SRGB_TO_PROPHOTO * lin);
+  float hi = max(max(e.r, e.g), e.b);
+  float lo = min(min(e.r, e.g), e.b);
+  float nhi = toneLut(hi);
+  float nlo = toneLut(lo);
+  vec3 o = hi - lo > 1e-6 ? nlo + (nhi - nlo) * (e - lo) / (hi - lo) : vec3(nhi);
+  vec3 l = mix(o / 12.92, pow((max(o, 0.0) + 0.055) / 1.055, vec3(2.4)), step(0.04045, o));
+  return clamp(PROPHOTO_TO_SRGB * l, 0.0, 1.0); // per-channel clip, like Lightroom's sRGB output
 }
 
 // ---- Color (mirrors engine/color.js) ----
@@ -117,22 +142,6 @@ vec2 hueSat(vec3 c) {
   h *= 60.0;
   if (h < 0.0) h += 360.0;
   return vec2(h, mx > 0.0 ? ch / mx : 0.0);
-}
-
-vec3 withHue(vec3 c, float h) {
-  float mx = max(max(c.r, c.g), c.b);
-  float mn = min(min(c.r, c.g), c.b);
-  float ch = mx - mn;
-  float hp = mod(mod(h, 360.0) + 360.0, 360.0) / 60.0;
-  float x = ch * (1.0 - abs(mod(hp, 2.0) - 1.0));
-  vec3 o;
-  if (hp < 1.0) o = vec3(ch, x, 0.0);
-  else if (hp < 2.0) o = vec3(x, ch, 0.0);
-  else if (hp < 3.0) o = vec3(0.0, ch, x);
-  else if (hp < 4.0) o = vec3(0.0, x, ch);
-  else if (hp < 5.0) o = vec3(x, 0.0, ch);
-  else o = vec3(ch, 0.0, x);
-  return o + mn;
 }
 
 float satVibFactor(vec3 c, float sat, float vib) {
@@ -191,21 +200,6 @@ vec3 applyGrade(vec3 c) {
   return linearToSrgb(fitGamut(oklabToLinear(o)));
 }
 
-// HSL band centres (degrees), incl. 360 to close the circle — same as color.js HSL_CENTERS.
-// A function rather than a float[9] constructor: some Mali drivers (via ANGLE) fail to compile
-// array constructors ("no default precision defined for variable 'float[N]'").
-float hslCenter(int i) {
-  if (i <= 0) return 0.0;
-  if (i == 1) return 30.0;
-  if (i == 2) return 60.0;
-  if (i == 3) return 120.0;
-  if (i == 4) return 180.0;
-  if (i == 5) return 240.0;
-  if (i == 6) return 275.0;
-  if (i == 7) return 320.0;
-  return 360.0;
-}
-
 // Integer hash + value noise — bit-identical to color.js grainAt().
 float hash2(ivec2 p) {
   uint h = uint(p.x) * 374761393u + uint(p.y) * 668265263u + 1013904223u;
@@ -225,25 +219,29 @@ float valueNoise(vec2 p) {
 void main() {
   vec3 c = texture(u_image, v_uv).rgb;
 
-  // Tone — see tone.js (math) and localBase.js (edge-aware local base).
-  // Linear light; white balance first (like a RAW converter), then Highlights/Shadows from the
-  // local base, then Whites/Blacks/Contrast; luminance-ratio scaling keeps hue; gamut fit
-  // instead of per-channel clipping.
-  if (u_useTone || u_useWB) {
+  // Tone — Lightroom-matched (lrModel.js; local base: localBase.js). Linear light: white
+  // balance + Saturation/Calibration matrix, then Shadows/Highlights (gain by zone), then the
+  // global curve (Exposure, Blacks, Whites, Contrast) hue-preserving on ProPhoto channels.
+  if (u_useTone || u_useLocal || u_useWB) {
     vec3 lin = srgbToLinear(c);
     if (u_useWB) lin = max(u_wbMatrix * lin, 0.0);
-    if (u_useTone) {
+    if (u_useLocal) {
       float Y0 = luma709(lin);
-      float v0 = log2(max(Y0, 1e-6));
-      float v1 = v0 + u_exposureEV;
-      if (u_useLocal) {
+      if (Y0 > 1e-8) {
+        float v0 = max(log2(Y0), -14.0);
         vec2 ab = texture(u_gfCoef, vec2(v_uv.x, 1.0 - v_uv.y)).rg; // map rows are top-down
-        float base = ab.x * v0 + ab.y + u_exposureEV;
-        v1 += texture(u_localLUT, vec2(lutCoord(base, 512.0), 0.5)).r;
+        float base = clamp(ab.x * v0 + ab.y, -14.0, 6.0);
+        float v = clamp(u_zoneMix * base + (1.0 - u_zoneMix) * v0, -14.0, 6.0) + u_exposureEV;
+        float t = clamp((v - u_zoneRange.x) / u_zoneRange.y, 0.0, 1.0);
+        vec2 g = texture(u_localLUT, vec2((t * 255.0 + 0.5) / 256.0, 0.5)).rg;
+        lin *= exp2(g.x + g.y);
+        // Keeps values above white; the gamut fit below handles them.
+        vec3 cz = scaleChroma(linearToSrgbOpen(lin), exp2(-u_zoneChroma.x * g.x - u_zoneChroma.y * g.y));
+        cz = max(cz, 0.0);
+        lin = mix(cz / 12.92, pow((cz + 0.055) / 1.055, vec3(2.4)), step(0.04045, cz));
       }
-      float Yf = exp2(v1) * texture(u_globalLUT, vec2(lutCoord(v1, 1024.0), 0.5)).r;
-      lin *= Yf / max(Y0, 1e-6);
     }
+    if (u_useTone) lin = toneRGB(lin);
     c = linearToSrgb(fitGamut(lin));
   }
   // Saturation + Vibrance: chroma around luma, capped at the gamut edge.
@@ -278,21 +276,20 @@ void main() {
     c = mix(c, graded, u_lutStrength);
   }
 
-  // HSL — 8 overlapping bands (weights sum to 1), faded out for near-greys.
+  // Color Mixer (lrModel.buildHSLTable): Oklab hue shift, chroma and lightness ratios looked up
+  // by the pixel's hue and chroma.
   if (u_hslActive) {
-    vec2 hs = hueSat(c);
-    float fade = smoothstep(0.03, 0.2, hs.y);
-    if (fade > 0.0) {
-      int i0 = 7;
-      for (int i = 0; i < 8; i++) { if (hs.x >= hslCenter(i) && hs.x < hslCenter(i + 1)) { i0 = i; } }
-      float t = smoothstep(0.0, 1.0, (hs.x - hslCenter(i0)) / (hslCenter(i0 + 1) - hslCenter(i0)));
-      int i1 = i0 == 7 ? 0 : i0 + 1;
-      float dh = mix(u_hslHue[i0], u_hslHue[i1], t) * fade;
-      float ds = mix(u_hslSat[i0], u_hslSat[i1], t) * fade;
-      float dl = mix(u_hslLum[i0], u_hslLum[i1], t) * fade;
-      if (dh != 0.0) c = withHue(c, hs.x + dh * 0.3);
-      if (ds != 0.0) c = scaleChroma(c, 1.0 + ds / 100.0);
-      if (dl != 0.0) c = linearToSrgb(fitGamut(srgbToLinear(c) * exp2(dl / 100.0 * 1.2)));
+    vec3 o = linearToOklab(srgbToLinear(max(c, 0.0)));
+    float cc = length(o.yz);
+    if (cc > 1e-5) {
+      float hd = atan(o.z, o.y) * 57.29577951;
+      if (hd < 0.0) hd += 360.0;
+      float y = (clamp(cc / 0.3, 0.0, 1.0) * 15.0 + 0.5) / 16.0;
+      vec3 e = texture(u_hslTable, vec2((hd + 0.5) / 361.0, y)).rgb;
+      float hr = (hd + e.x) * 0.01745329252;
+      float c2 = cc * exp(e.y);
+      o = vec3(o.x * exp(e.z), cos(hr) * c2, sin(hr) * c2);
+      c = linearToSrgb(fitGamut(max(oklabToLinear(o), 0.0)));
     }
   }
 
