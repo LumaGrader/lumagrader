@@ -5,6 +5,16 @@ export const POPUP_FROM = '0.9.4'
 
 export const CHANGELOG = [
   {
+    version: '1.1.0',
+    date: '2026-10-23',
+    title: 'Presets look right',
+    items: [
+      'Light sliders, Saturation and Color Mixer re-measured: imported presets now look like they do in the editor they were made in.',
+      'Calibration from imported presets is now applied (no panel yet).',
+      'Note: photos edited in earlier versions will look a little different.',
+    ],
+  },
+  {
     version: '1.0.0',
     date: '2026-10-08',
     title: 'New look',
